@@ -1,0 +1,838 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line
+} from 'recharts';
+import { 
+  Home, Calendar, Car, FileText, Plus, ChevronLeft, ChevronRight, 
+  Settings, Download, AlertTriangle, CheckCircle2, MapPin, Briefcase
+} from 'lucide-react';
+
+// --- CONFIGURACIÓN INICIAL Y DATOS DE PRUEBA ---
+const PROVINCIAS = ['Almería', 'Cádiz', 'Córdoba', 'Granada', 'Huelva', 'Jaén', 'Málaga', 'Sevilla', 'Personal', 'Murcia', 'Extremadura'];
+const TIPOS_VIAJE = ['Reparación', 'Visita', 'Instalación', 'Personal', 'Formación', 'Repetición'];
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+const VEHICULOS_INICIALES = [
+  { id: 'v1', name: 'Furgoneta Principal', plate: '1234 ABC', initialKm: 120500, status: 'activo', color: '#3b82f6' },
+  { id: 'v2', name: 'Coche Comercial', plate: '5678 DEF', initialKm: 85200, status: 'activo', color: '#10b981' },
+  { id: 'v3', name: 'Furgoneta Secundaria', plate: '9012 GHI', initialKm: 195000, status: 'activo', color: '#f59e0b' },
+  { id: 'v4', name: 'Vehículo Dirección', plate: '3456 JKL', initialKm: 45000, status: 'activo', color: '#8b5cf6' },
+  { id: 'v5', name: 'Furgoneta Apoyo', plate: '7890 MNO', initialKm: 210000, status: 'inactivo', color: '#ef4444' },
+];
+
+// Generar algunos datos de prueba para el mes actual
+const generarDatosPrueba = () => {
+  const logs = [];
+  const hoy = new Date();
+  const año = hoy.getFullYear();
+  const mes = hoy.getMonth() + 1; // 1-12
+  
+  let currentKm = { 'v1': 120500, 'v2': 85200, 'v3': 195000 };
+  
+  for (let i = 1; i <= hoy.getDate() - 1; i++) {
+    // Furgoneta 1 viaja casi todos los días
+    if (Math.random() > 0.2) {
+      const distance = Math.floor(Math.random() * 150) + 50;
+      const dateStr = `${año}-${String(mes).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+      logs.push({
+        id: `mock-v1-${i}`, vehicleId: 'v1', date: dateStr, startKm: currentKm['v1'], endKm: currentKm['v1'] + distance,
+        totalKm: distance, province: PROVINCIAS[Math.floor(Math.random() * 8)], tripType: TIPOS_VIAJE[Math.floor(Math.random() * 4)],
+        notes: 'Ruta habitual'
+      });
+      currentKm['v1'] += distance;
+    }
+    // Coche Comercial
+    if (Math.random() > 0.5) {
+      const distance = Math.floor(Math.random() * 300) + 100;
+      const dateStr = `${año}-${String(mes).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+      logs.push({
+        id: `mock-v2-${i}`, vehicleId: 'v2', date: dateStr, startKm: currentKm['v2'], endKm: currentKm['v2'] + distance,
+        totalKm: distance, province: PROVINCIAS[Math.floor(Math.random() * 8)], tripType: 'Visita', notes: 'Visita clientes'
+      });
+      currentKm['v2'] += distance;
+    }
+  }
+  return logs;
+};
+
+// --- UTILIDADES DE FECHA ---
+const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+const getFirstDayOfMonth = (year, month) => {
+  let day = new Date(year, month, 1).getDay();
+  return day === 0 ? 6 : day - 1; // Lunes = 0, Domingo = 6
+};
+const formatISODate = (date) => date.toISOString().split('T')[0];
+
+// --- COMPONENTE PRINCIPAL ---
+export default function FleetManagerApp() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [vehicles, setVehicles] = useState(() => {
+    const saved = localStorage.getItem('fleet_vehicles');
+    return saved ? JSON.parse(saved) : VEHICULOS_INICIALES;
+  });
+  const [logs, setLogs] = useState(() => {
+    const saved = localStorage.getItem('fleet_logs');
+    return saved ? JSON.parse(saved) : generarDatosPrueba();
+  });
+  
+  // Estado para modales
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(formatISODate(new Date()));
+  const [selectedVehicleId, setSelectedVehicleId] = useState(vehicles[0]?.id || '');
+
+  // Guardar en localStorage cuando cambien
+  useEffect(() => {
+    localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles));
+    localStorage.setItem('fleet_logs', JSON.stringify(logs));
+  }, [vehicles, logs]);
+
+  // Funciones CRUD para Logs
+  const saveLog = (logData) => {
+    setLogs(prevLogs => {
+      // Si ya existe un log para ese vehículo y día, lo actualizamos
+      const existingIndex = prevLogs.findIndex(l => l.vehicleId === logData.vehicleId && l.date === logData.date);
+      if (existingIndex >= 0) {
+        const newLogs = [...prevLogs];
+        newLogs[existingIndex] = { ...logData, id: prevLogs[existingIndex].id, totalKm: logData.endKm - logData.startKm };
+        return newLogs;
+      }
+      // Si es nuevo
+      return [...prevLogs, { ...logData, id: Date.now().toString(), totalKm: logData.endKm - logData.startKm }];
+    });
+    setIsLogModalOpen(false);
+  };
+
+  const deleteLog = (logId) => {
+    setLogs(prevLogs => prevLogs.filter(l => l.id !== logId));
+    setIsLogModalOpen(false);
+  };
+
+  const exportToCSV = () => {
+    const headers = ['Fecha', 'Vehículo', 'Matrícula', 'Km Inicio', 'Km Fin', 'Total Km', 'Provincia', 'Motivo', 'Notas'];
+    const rows = logs.map(log => {
+      const v = vehicles.find(v => v.id === log.vehicleId);
+      return [
+        log.date, v?.name || 'Desconocido', v?.plate || '', 
+        log.startKm, log.endKm, log.totalKm, 
+        log.province || '', log.tripType || '', `"${log.notes || ''}"`
+      ].join(',');
+    });
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `informe_flota_${formatISODate(new Date())}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans text-gray-800">
+      {/* SIDEBAR / NAVEGACIÓN */}
+      <nav className="bg-slate-900 text-white w-full md:w-64 flex-shrink-0 md:min-h-screen z-10 sticky top-0 md:fixed flex flex-col shadow-xl">
+        <div className="p-4 flex items-center gap-3 border-b border-slate-700">
+          <div className="bg-blue-600 p-2 rounded-lg"><Car size={24} className="text-white"/></div>
+          <div>
+            <h1 className="font-bold text-lg leading-tight">FleetManager</h1>
+            <p className="text-xs text-slate-400">Control de Kilometraje</p>
+          </div>
+        </div>
+        
+        <div className="flex-1 flex md:flex-col overflow-x-auto md:overflow-y-auto py-2 md:py-4 px-2 gap-1 no-scrollbar">
+          <NavItem icon={<Home size={20}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          <NavItem icon={<Calendar size={20}/>} label="Calendario" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
+          <NavItem icon={<FileText size={20}/>} label="Registros" active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} />
+          <NavItem icon={<Car size={20}/>} label="Vehículos" active={activeTab === 'vehicles'} onClick={() => setActiveTab('vehicles')} />
+          
+          <div className="md:mt-auto hidden md:block px-3 py-4">
+            <button 
+              onClick={exportToCSV}
+              className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-sm py-2 rounded-lg transition-colors border border-slate-600"
+            >
+              <Download size={16} /> Exportar Excel
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* CONTENIDO PRINCIPAL */}
+      <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto w-full max-w-7xl mx-auto pb-24 md:pb-8">
+        
+        {/* Cabecera Móvil */}
+        <div className="flex justify-between items-center mb-6 md:hidden">
+          <h2 className="text-xl font-bold text-slate-800 capitalize">{activeTab}</h2>
+          <button onClick={exportToCSV} className="p-2 bg-slate-200 rounded-full text-slate-700">
+            <Download size={18} />
+          </button>
+        </div>
+
+        {/* VISTAS */}
+        {activeTab === 'dashboard' && <DashboardView logs={logs} vehicles={vehicles} />}
+        {activeTab === 'calendar' && (
+          <CalendarView 
+            logs={logs} 
+            vehicles={vehicles} 
+            onDayClick={(date, vId) => {
+              setSelectedDate(date);
+              setSelectedVehicleId(vId);
+              setIsLogModalOpen(true);
+            }} 
+          />
+        )}
+        {activeTab === 'logs' && <LogsView logs={logs} vehicles={vehicles} onEdit={(log) => {
+           setSelectedDate(log.date);
+           setSelectedVehicleId(log.vehicleId);
+           setIsLogModalOpen(true);
+        }}/>}
+        {activeTab === 'vehicles' && <VehiclesView vehicles={vehicles} setVehicles={setVehicles} logs={logs} />}
+
+      </main>
+
+      {/* BOTÓN FLOTANTE MÓVIL (Añadir Registro) */}
+      <button 
+        onClick={() => {
+          setSelectedDate(formatISODate(new Date()));
+          setIsLogModalOpen(true);
+        }}
+        className="md:hidden fixed bottom-20 right-4 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 z-20 flex items-center justify-center"
+      >
+        <Plus size={24} />
+      </button>
+
+      {/* FAB DESKTOP */}
+      <button 
+        onClick={() => {
+          setSelectedDate(formatISODate(new Date()));
+          setIsLogModalOpen(true);
+        }}
+        className="hidden md:flex fixed bottom-8 right-8 bg-blue-600 text-white px-6 py-3 rounded-full shadow-xl hover:bg-blue-700 z-20 items-center gap-2 font-medium transition-transform hover:scale-105"
+      >
+        <Plus size={20} /> Nuevo Registro
+      </button>
+
+      {/* MODAL FORMULARIO DE REGISTRO */}
+      {isLogModalOpen && (
+        <LogModal 
+          isOpen={isLogModalOpen} 
+          onClose={() => setIsLogModalOpen(false)}
+          date={selectedDate}
+          vehicleId={selectedVehicleId}
+          logs={logs}
+          vehicles={vehicles}
+          onSave={saveLog}
+          onDelete={deleteLog}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- SUBCOMPONENTES DE UI ---
+
+const NavItem = ({ icon, label, active, onClick }) => (
+  <button 
+    onClick={onClick}
+    className={`flex items-center gap-3 px-4 py-3 md:py-3 md:px-3 rounded-xl transition-all whitespace-nowrap md:whitespace-normal
+      ${active ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+  >
+    {icon}
+    <span className="font-medium text-sm">{label}</span>
+  </button>
+);
+
+const Card = ({ children, className = '' }) => (
+  <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 p-5 ${className}`}>
+    {children}
+  </div>
+);
+
+// --- VISTAS ---
+
+function DashboardView({ logs, vehicles }) {
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+
+  const stats = useMemo(() => {
+    let monthKm = 0;
+    let yearKm = 0;
+    let todayKm = 0;
+    let todayStr = formatISODate(new Date());
+
+    logs.forEach(log => {
+      const logDate = new Date(log.date);
+      if (logDate.getFullYear() === currentYear) {
+        yearKm += log.totalKm;
+        if (logDate.getMonth() === currentMonth) {
+          monthKm += log.totalKm;
+        }
+      }
+      if (log.date === todayStr) todayKm += log.totalKm;
+    });
+
+    return { monthKm, yearKm, todayKm };
+  }, [logs, currentMonth, currentYear]);
+
+  // Datos para gráficos
+  const kmByVehicle = vehicles.map(v => {
+    const vLogs = logs.filter(l => l.vehicleId === v.id && new Date(l.date).getFullYear() === currentYear);
+    const total = vLogs.reduce((acc, curr) => acc + curr.totalKm, 0);
+    return { name: v.name, km: total, fill: v.color };
+  }).filter(item => item.km > 0).sort((a,b) => b.km - a.km);
+
+  const kmByProvince = useMemo(() => {
+    const provinceMap = {};
+    logs.forEach(l => {
+      if (!l.province) return;
+      provinceMap[l.province] = (provinceMap[l.province] || 0) + l.totalKm;
+    });
+    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'];
+    return Object.keys(provinceMap).map((key, i) => ({
+      name: key, value: provinceMap[key], color: COLORS[i % COLORS.length]
+    })).sort((a,b) => b.value - a.value).slice(0, 5); // Top 5
+  }, [logs]);
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">Resumen General</h2>
+        <p className="text-slate-500 text-sm">Estadísticas clave de la flota de vehículos</p>
+      </div>
+
+      {/* TARJETAS KPI */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-none">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-blue-100 text-sm font-medium">Kilómetros Hoy</p>
+              <h3 className="text-3xl font-bold mt-1">{stats.todayKm.toLocaleString()} <span className="text-lg font-normal">km</span></h3>
+            </div>
+            <div className="bg-white/20 p-2 rounded-lg"><Car size={24} /></div>
+          </div>
+        </Card>
+        
+        <Card>
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-slate-500 text-sm font-medium">Este Mes ({MESES[currentMonth]})</p>
+              <h3 className="text-3xl font-bold text-slate-800 mt-1">{stats.monthKm.toLocaleString()} <span className="text-lg font-normal text-slate-500">km</span></h3>
+            </div>
+            <div className="bg-emerald-100 text-emerald-600 p-2 rounded-lg"><Calendar size={24} /></div>
+          </div>
+          <div className="mt-4 text-xs font-medium text-emerald-600 flex items-center gap-1">
+             <CheckCircle2 size={14}/> Datos al día
+          </div>
+        </Card>
+
+        <Card>
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-slate-500 text-sm font-medium">Acumulado Anual ({currentYear})</p>
+              <h3 className="text-3xl font-bold text-slate-800 mt-1">{stats.yearKm.toLocaleString()} <span className="text-lg font-normal text-slate-500">km</span></h3>
+            </div>
+            <div className="bg-amber-100 text-amber-600 p-2 rounded-lg"><AlertTriangle size={24} /></div>
+          </div>
+          <div className="mt-4 text-xs font-medium text-slate-500">
+             El vehículo más usado es {kmByVehicle[0]?.name || 'N/A'}
+          </div>
+        </Card>
+      </div>
+
+      {/* GRÁFICOS */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-6">Kilómetros por Vehículo (Año)</h3>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={kmByVehicle} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" />
+                <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} />
+                <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}/>
+                <Bar dataKey="km" radius={[0, 4, 4, 0]}>
+                  {kmByVehicle.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill || '#3b82f6'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-6">Top 5 Provincias Visitadas</h3>
+          <div className="h-72 flex items-center justify-center">
+             {kmByProvince.length > 0 ? (
+               <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={kmByProvince}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={5}
+                    dataKey="value"
+                    label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    {kmByProvince.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}/>
+                </PieChart>
+              </ResponsiveContainer>
+             ) : (
+               <div className="text-slate-400 text-sm">No hay datos suficientes</div>
+             )}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function CalendarView({ logs, vehicles, onDayClick }) {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedVehicleId, setSelectedVehicleId] = useState(vehicles[0]?.id || '');
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+
+  const daysInMonth = getDaysInMonth(year, month);
+  const firstDay = getFirstDayOfMonth(year, month);
+
+  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+
+  // Preparar celdas del calendario
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) {
+    cells.push(<div key={`empty-${i}`} className="bg-gray-50/50 border border-slate-100 p-2 min-h-[100px]"></div>);
+  }
+
+  const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId);
+  let mesTotalKm = 0;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayLog = logs.find(l => l.vehicleId === selectedVehicleId && l.date === dateStr);
+    
+    if (dayLog) mesTotalKm += dayLog.totalKm;
+
+    const isToday = formatISODate(new Date()) === dateStr;
+
+    cells.push(
+      <div 
+        key={dateStr} 
+        onClick={() => onDayClick(dateStr, selectedVehicleId)}
+        className={`bg-white border border-slate-100 p-2 min-h-[100px] hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group flex flex-col
+          ${isToday ? 'ring-2 ring-blue-500 ring-inset bg-blue-50/30' : ''}`}
+      >
+        <div className="flex justify-between items-start mb-2">
+          <span className={`text-sm font-semibold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
+            {day}
+          </span>
+          {dayLog && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">{dayLog.totalKm} km</span>}
+        </div>
+        
+        {dayLog ? (
+          <div className="mt-auto space-y-1">
+            <div className="flex justify-between text-[11px] text-slate-500">
+              <span>Inicio:</span> <span className="font-mono text-slate-700">{dayLog.startKm.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between text-[11px] text-slate-500">
+              <span>Fin:</span> <span className="font-mono text-slate-700">{dayLog.endKm.toLocaleString()}</span>
+            </div>
+            {(dayLog.province || dayLog.tripType) && (
+              <div className="pt-1 mt-1 border-t border-slate-100 flex gap-1 truncate text-[10px] text-slate-400">
+                <MapPin size={10}/> {dayLog.province}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-auto flex justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+             <Plus size={16} className="text-blue-400"/>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 animate-in fade-in duration-300">
+      
+      {/* Controles del Calendario */}
+      <Card className="flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex items-center gap-4 bg-slate-100 p-1 rounded-lg">
+          <button onClick={prevMonth} className="p-2 hover:bg-white rounded-md transition-colors"><ChevronLeft size={20}/></button>
+          <h2 className="text-lg font-bold w-40 text-center text-slate-800 capitalize">{MESES[month]} {year}</h2>
+          <button onClick={nextMonth} className="p-2 hover:bg-white rounded-md transition-colors"><ChevronRight size={20}/></button>
+        </div>
+
+        <div className="flex items-center gap-4 w-full md:w-auto">
+          <select 
+            className="w-full md:w-64 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+            value={selectedVehicleId}
+            onChange={(e) => setSelectedVehicleId(e.target.value)}
+          >
+            {vehicles.map(v => (
+              <option key={v.id} value={v.id}>{v.name} ({v.plate})</option>
+            ))}
+          </select>
+        </div>
+      </Card>
+
+      {/* Resumen del Mes */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex justify-between items-center">
+         <div>
+            <p className="text-blue-800 font-medium text-sm">Resumen mensual para {selectedVehicle?.name}</p>
+         </div>
+         <div className="text-right">
+            <p className="text-2xl font-bold text-blue-700">{mesTotalKm.toLocaleString()} <span className="text-sm font-normal">km recorridos</span></p>
+         </div>
+      </div>
+
+      {/* Grid del Calendario */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        {/* Cabecera Días */}
+        <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
+          {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => (
+            <div key={d} className="p-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">
+              {d}
+            </div>
+          ))}
+        </div>
+        {/* Celdas */}
+        <div className="grid grid-cols-7 bg-slate-100 gap-[1px]">
+          {cells}
+        </div>
+      </div>
+      <p className="text-xs text-slate-400 text-center mt-4">Haz clic en cualquier día para añadir o editar el registro (Funcionalidad idéntica al Excel).</p>
+    </div>
+  );
+}
+
+function LogsView({ logs, vehicles, onEdit }) {
+  const sortedLogs = [...logs].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  return (
+    <div className="space-y-4 animate-in fade-in duration-300">
+      <h2 className="text-2xl font-bold text-slate-800 mb-6">Últimos Registros</h2>
+      
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
+                <th className="p-4 font-medium">Fecha</th>
+                <th className="p-4 font-medium">Vehículo</th>
+                <th className="p-4 font-medium text-right">Km Inicio</th>
+                <th className="p-4 font-medium text-right">Km Fin</th>
+                <th className="p-4 font-medium text-right text-blue-600">Total</th>
+                <th className="p-4 font-medium hidden md:table-cell">Motivo/Provincia</th>
+                <th className="p-4 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody className="text-sm divide-y divide-slate-100">
+              {sortedLogs.slice(0, 50).map(log => {
+                const vehicle = vehicles.find(v => v.id === log.vehicleId);
+                return (
+                  <tr key={log.id} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => onEdit(log)}>
+                    <td className="p-4 font-medium text-slate-700 whitespace-nowrap">{log.date}</td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{backgroundColor: vehicle?.color || '#ccc'}}></div>
+                        {vehicle?.name || 'Borrado'}
+                      </div>
+                    </td>
+                    <td className="p-4 text-right font-mono text-slate-500">{log.startKm.toLocaleString()}</td>
+                    <td className="p-4 text-right font-mono text-slate-500">{log.endKm.toLocaleString()}</td>
+                    <td className="p-4 text-right font-bold text-blue-600 bg-blue-50/50">{log.totalKm.toLocaleString()}</td>
+                    <td className="p-4 hidden md:table-cell">
+                       <div className="flex flex-col">
+                          <span className="text-slate-800">{log.tripType}</span>
+                          <span className="text-xs text-slate-400 flex items-center gap-1"><MapPin size={10}/>{log.province}</span>
+                       </div>
+                    </td>
+                    <td className="p-4 text-right text-blue-500 hover:text-blue-700 font-medium text-xs">Editar</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {sortedLogs.length === 0 && (
+          <div className="p-8 text-center text-slate-400">No hay registros todavía.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VehiclesView({ vehicles, setVehicles, logs }) {
+  // Calcula kms actuales de cada vehículo (el max endKm)
+  const getVehiculosData = () => {
+    return vehicles.map(v => {
+      const vLogs = logs.filter(l => l.vehicleId === v.id);
+      let currentKm = v.initialKm;
+      if (vLogs.length > 0) {
+        currentKm = Math.max(...vLogs.map(l => l.endKm));
+      }
+      return { ...v, currentKm };
+    });
+  };
+
+  const data = getVehiculosData();
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-slate-800">Flota de Vehículos</h2>
+        <span className="bg-blue-100 text-blue-700 py-1 px-3 rounded-full text-sm font-bold">{vehicles.length} / 5</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {data.map(v => (
+          <Card key={v.id} className="relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-full h-1" style={{backgroundColor: v.color}}></div>
+            <div className="flex justify-between items-start mb-4">
+               <div>
+                 <h3 className="font-bold text-lg text-slate-800">{v.name}</h3>
+                 <span className="inline-block bg-slate-100 text-slate-600 text-xs px-2 py-1 rounded font-mono mt-1 border border-slate-200">{v.plate}</span>
+               </div>
+               <div className={`p-2 rounded-lg ${v.status === 'activo' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                  <Car size={20} />
+               </div>
+            </div>
+            
+            <div className="space-y-3 mt-6 border-t border-slate-100 pt-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500">Km Iniciales</span>
+                <span className="font-mono text-sm text-slate-700">{v.initialKm.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center bg-slate-50 p-2 rounded">
+                <span className="text-sm font-bold text-slate-700">Km Actuales</span>
+                <span className="font-mono font-bold text-blue-600">{v.currentKm.toLocaleString()}</span>
+              </div>
+            </div>
+          </Card>
+        ))}
+        
+        {vehicles.length < 5 && (
+           <button className="border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center p-8 text-slate-400 hover:text-blue-500 hover:border-blue-400 hover:bg-blue-50 transition-colors h-full min-h-[200px]">
+              <Plus size={32} className="mb-2"/>
+              <span className="font-medium">Añadir Vehículo</span>
+           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// --- MODAL DE REGISTRO INTELIGENTE ---
+// Reemplaza la lógica de celdas de Excel
+
+function LogModal({ isOpen, onClose, date, vehicleId, logs, vehicles, onSave, onDelete }) {
+  const vehicle = vehicles.find(v => v.id === vehicleId) || vehicles[0];
+  
+  // Buscar si ya existe un log para este día
+  const existingLog = logs.find(l => l.vehicleId === vehicle.id && l.date === date);
+  
+  // Buscar el kilometraje final del registro anterior a la fecha seleccionada
+  // Esta es la LÓGICA PRINCIPAL que sustituye al arrastre de Excel
+  const getSuggestedStartKm = () => {
+    if (existingLog) return existingLog.startKm;
+    
+    // Filtrar logs del vehículo anteriores a la fecha seleccionada
+    const previousLogs = logs
+      .filter(l => l.vehicleId === vehicle.id && l.date < date)
+      .sort((a, b) => new Date(b.date) - new Date(a.date)); // Orden descendente
+      
+    if (previousLogs.length > 0) {
+      return previousLogs[0].endKm; // El km final del día anterior
+    }
+    return vehicle.initialKm; // Si no hay registros previos, usar km inicial
+  };
+
+  const [formData, setFormData] = useState({
+    vehicleId: vehicle.id,
+    date: date,
+    startKm: getSuggestedStartKm(),
+    endKm: existingLog ? existingLog.endKm : '',
+    province: existingLog?.province || '',
+    tripType: existingLog?.tripType || '',
+    notes: existingLog?.notes || ''
+  });
+
+  const [error, setError] = useState('');
+
+  // Efecto para actualizar cuando cambian las props iniciales (si el usuario cambia de vehículo en el form)
+  useEffect(() => {
+    const prevLogs = logs.filter(l => l.vehicleId === formData.vehicleId && l.date < formData.date).sort((a,b) => new Date(b.date) - new Date(a.date));
+    const suggestedStart = prevLogs.length > 0 ? prevLogs[0].endKm : (vehicles.find(v=>v.id===formData.vehicleId)?.initialKm || 0);
+    
+    // Solo actualizar startKm automáticamente si no estamos editando un log existente
+    const currentExistingLog = logs.find(l => l.vehicleId === formData.vehicleId && l.date === formData.date);
+    
+    if (!currentExistingLog && !existingLog) {
+       setFormData(prev => ({ ...prev, startKm: suggestedStart }));
+    }
+  }, [formData.vehicleId, formData.date]);
+
+  const totalCalculado = (Number(formData.endKm) || 0) - Number(formData.startKm);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.endKm || Number(formData.endKm) <= Number(formData.startKm)) {
+      setError('El Km Final debe ser mayor que el Km de Inicio.');
+      return;
+    }
+    setError('');
+    onSave({
+      ...formData,
+      startKm: Number(formData.startKm),
+      endKm: Number(formData.endKm)
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+        
+        <div className="bg-blue-600 p-4 text-white flex justify-between items-center shrink-0">
+          <h3 className="font-bold text-lg flex items-center gap-2">
+            {existingLog ? 'Editar Registro' : 'Nuevo Registro'}
+          </h3>
+          <button onClick={onClose} className="text-blue-100 hover:text-white p-1 bg-blue-700/50 rounded">✕</button>
+        </div>
+
+        <div className="p-6 overflow-y-auto flex-1">
+          {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-100 flex items-center gap-2"><AlertTriangle size={16}/> {error}</div>}
+          
+          <form id="logForm" onSubmit={handleSubmit} className="space-y-4">
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase">Vehículo</label>
+                <select 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={formData.vehicleId}
+                  onChange={e => setFormData({...formData, vehicleId: e.target.value})}
+                  disabled={!!existingLog} // No permitir cambiar vehículo al editar
+                >
+                  {vehicles.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase">Fecha</label>
+                <input 
+                  type="date" 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={formData.date}
+                  onChange={e => setFormData({...formData, date: e.target.value})}
+                  disabled={!!existingLog}
+                />
+              </div>
+            </div>
+
+            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 space-y-4 relative">
+               {!existingLog && (
+                 <div className="absolute top-2 right-2 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                   Auto-calculado
+                 </div>
+               )}
+               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Km Inicio</label>
+                  <input 
+                    type="number" 
+                    className="w-full p-3 bg-white border border-slate-200 rounded-lg font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={formData.startKm}
+                    onChange={e => setFormData({...formData, startKm: e.target.value})}
+                  />
+                  <p className="text-[10px] text-slate-400">Del día anterior</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-blue-600 uppercase">Km Final</label>
+                  <input 
+                    type="number" 
+                    className="w-full p-3 bg-white border border-blue-300 rounded-lg font-mono text-lg focus:ring-2 focus:ring-blue-500 outline-none ring-4 ring-blue-50"
+                    value={formData.endKm}
+                    onChange={e => setFormData({...formData, endKm: e.target.value})}
+                    placeholder="Ej. 120650"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-blue-100 pt-3 flex justify-between items-center">
+                 <span className="text-sm font-medium text-slate-600">Total Recorrido:</span>
+                 <span className={`text-2xl font-bold ${totalCalculado > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                    {totalCalculado > 0 ? `+${totalCalculado}` : 0} <span className="text-sm font-normal">km</span>
+                 </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><MapPin size={12}/> Provincia</label>
+                <select 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={formData.province}
+                  onChange={e => setFormData({...formData, province: e.target.value})}
+                >
+                  <option value="">Seleccionar...</option>
+                  {PROVINCIAS.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Briefcase size={12}/> Motivo</label>
+                <select 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={formData.tripType}
+                  onChange={e => setFormData({...formData, tripType: e.target.value})}
+                >
+                  <option value="">Seleccionar...</option>
+                  {TIPOS_VIAJE.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500 uppercase">Observaciones</label>
+              <textarea 
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                rows="2"
+                placeholder="Notas opcionales..."
+                value={formData.notes}
+                onChange={e => setFormData({...formData, notes: e.target.value})}
+              ></textarea>
+            </div>
+
+          </form>
+        </div>
+        
+        <div className="bg-slate-50 p-4 border-t border-slate-200 flex justify-between items-center shrink-0">
+          {existingLog ? (
+            <button type="button" onClick={() => onDelete(existingLog.id)} className="text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+              Borrar
+            </button>
+          ) : <div></div>}
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg text-sm font-medium transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" form="logForm" className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-md">
+              Guardar Registro
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
