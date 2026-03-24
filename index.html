@@ -52,12 +52,14 @@
         // ⚙️ CONFIGURACIÓN DE FIREBASE (¡IMPORTANTE PARA GITHUB PAGES!)
         // Sustituye estos valores por los de tu proyecto de Firebase Console
         // ============================================================================
-        const USER_FIREBASE_CONFIG = {apiKey: "AIzaSyA0H-PqoBiU7kuYzjaMFyd0lL4qxuPuiqA",
-  authDomain: "control-flota-serviprinter.firebaseapp.com",
-  projectId: "control-flota-serviprinter",
-  storageBucket: "control-flota-serviprinter.firebasestorage.app",
-  messagingSenderId: "430672467896",
-  appId: "1:430672467896:web:f292fdf218e9af6221a14d"};
+        const USER_FIREBASE_CONFIG = {
+            apiKey: "TU_API_KEY",
+            authDomain: "tu-proyecto.firebaseapp.com",
+            projectId: "tu-proyecto",
+            storageBucket: "tu-proyecto.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
+        };
 
         // Lógica dual: Usa el entorno local si existe (para probar aquí), si no usa la tuya (GitHub Pages)
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : USER_FIREBASE_CONFIG;
@@ -65,13 +67,15 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // Ayudante de rutas (Colecciones privadas por usuario)
+        // Ayudante de rutas (Colecciones GLOABLES COMPARTIDAS)
         const getCollectionRef = (user, colName) => {
             if (typeof __app_id !== 'undefined') {
-                return collection(db, 'artifacts', __app_id, 'users', user.uid, colName);
+                // Entorno interno de pruebas
+                return collection(db, 'artifacts', __app_id, 'public', 'data', colName);
             }
-            // Ruta estándar para tu propio Firebase
-            return collection(db, 'users', user.uid, colName);
+            // 🚨 CAMBIO APLICADO: Ruta estándar GLOBAL para tu GitHub Pages
+            // Al omitir 'user.uid', todos los dispositivos leen y escriben en la misma colección centralizada
+            return collection(db, colName);
         };
 
         // --- CONSTANTES ---
