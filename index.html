@@ -8,140 +8,227 @@
     <!-- Carga de Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Mapas de importación: Le dicen al navegador de dónde sacar las librerías -->
+    <!-- Mapas de importación con Firebase añadido -->
     <script type="importmap">
     {
         "imports": {
             "react": "https://esm.sh/react@18.2.0",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
             "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
-            "lucide-react": "https://esm.sh/lucide-react@0.344.0?deps=react@18.2.0"
+            "lucide-react": "https://esm.sh/lucide-react@0.344.0?deps=react@18.2.0",
+            "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
         }
     }
     </script>
     
-    <!-- Babel: Permite que el navegador lea el código JSX -->
+    <!-- Babel para JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
-        /* Ocultar barra de desplazamiento para un diseño más limpio */
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-        .no-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans">
     
-    <!-- Aquí es donde React renderizará la aplicación -->
     <div id="root"></div>
 
-    <!-- Script principal de la aplicación -->
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { 
-            BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-            PieChart, Pie, Cell, LineChart, Line
-        } from 'recharts';
-        import { 
-            Home, Calendar, Car, FileText, Plus, ChevronLeft, ChevronRight, 
-            Settings, Download, AlertTriangle, CheckCircle2, MapPin, Briefcase
-        } from 'lucide-react';
+        import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+        import { Home, Calendar, Car, FileText, Plus, ChevronLeft, ChevronRight, Download, AlertTriangle, CheckCircle2, MapPin, Briefcase, RefreshCw, Loader2 } from 'lucide-react';
 
-        // --- CONFIGURACIÓN INICIAL Y DATOS DE PRUEBA ---
+        // --- IMPORTACIONES DE FIREBASE ---
+        import { initializeApp } from "firebase/app";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
+
+        // ============================================================================
+        // ⚙️ CONFIGURACIÓN DE FIREBASE (¡IMPORTANTE PARA GITHUB PAGES!)
+        // Sustituye estos valores por los de tu proyecto de Firebase Console
+        // ============================================================================
+        const USER_FIREBASE_CONFIG = {
+            apiKey: "TU_API_KEY",
+            authDomain: "tu-proyecto.firebaseapp.com",
+            projectId: "tu-proyecto",
+            storageBucket: "tu-proyecto.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
+        };
+
+        // Lógica dual: Usa el entorno local si existe (para probar aquí), si no usa la tuya (GitHub Pages)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : USER_FIREBASE_CONFIG;
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Ayudante de rutas (Colecciones privadas por usuario)
+        const getCollectionRef = (user, colName) => {
+            if (typeof __app_id !== 'undefined') {
+                return collection(db, 'artifacts', __app_id, 'users', user.uid, colName);
+            }
+            // Ruta estándar para tu propio Firebase
+            return collection(db, 'users', user.uid, colName);
+        };
+
+        // --- CONSTANTES ---
         const PROVINCIAS = ['Almería', 'Cádiz', 'Córdoba', 'Granada', 'Huelva', 'Jaén', 'Málaga', 'Sevilla', 'Personal', 'Murcia', 'Extremadura'];
         const TIPOS_VIAJE = ['Reparación', 'Visita', 'Instalación', 'Personal', 'Formación', 'Repetición'];
         const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
         const VEHICULOS_INICIALES = [
-            { id: 'v1', name: 'Citroen Manuel', plate: '1234 ABC', initialKm: 120500, status: 'activo', color: '#3b82f6' },
-            { id: 'v2', name: 'Citroen Miguel Ángel', plate: '5678 DEF', initialKm: 85200, status: 'activo', color: '#10b981' },
-            { id: 'v3', name: 'Toyota Miguel', plate: '9012 GHI', initialKm: 195000, status: 'activo', color: '#f59e0b' },
-            { id: 'v4', name: 'Vehículo Dirección', plate: '3456 JKL', initialKm: 45000, status: 'activo', color: '#8b5cf6' },
-            { id: 'v5', name: 'Furgoneta Apoyo', plate: '7890 MNO', initialKm: 210000, status: 'inactivo', color: '#ef4444' },
+            { id: 'v1', name: 'Citroen Manuel', plate: '1234 ABC', initialKm: 0, status: 'activo', color: '#3b82f6' },
+            { id: 'v2', name: 'Citroen Miguel Ángel', plate: '5678 DEF', initialKm: 0, status: 'activo', color: '#10b981' },
+            { id: 'v3', name: 'Toyota Miguel', plate: '9012 GHI', initialKm: 0, status: 'activo', color: '#f59e0b' },
+            { id: 'v4', name: 'Vehículo Dirección', plate: '3456 JKL', initialKm: 0, status: 'activo', color: '#8b5cf6' },
+            { id: 'v5', name: 'Furgoneta Apoyo', plate: '7890 MNO', initialKm: 0, status: 'inactivo', color: '#ef4444' },
         ];
 
-        // Generar algunos datos de prueba para el mes actual
-        const generarDatosPrueba = () => {
-            const logs = [];
-            const hoy = new Date();
-            const año = hoy.getFullYear();
-            const mes = hoy.getMonth() + 1; // 1-12
-            
-            let currentKm = { 'v1': 120500, 'v2': 85200, 'v3': 195000 };
-            
-            for (let i = 1; i <= hoy.getDate() - 1; i++) {
-                if (Math.random() > 0.2) {
-                    const distance = Math.floor(Math.random() * 150) + 50;
-                    const dateStr = `${año}-${String(mes).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-                    logs.push({
-                        id: `mock-v1-${i}`, vehicleId: 'v1', date: dateStr, startKm: currentKm['v1'], endKm: currentKm['v1'] + distance,
-                        totalKm: distance, province: PROVINCIAS[Math.floor(Math.random() * 8)], tripType: TIPOS_VIAJE[Math.floor(Math.random() * 4)],
-                        notes: 'Ruta habitual'
-                    });
-                    currentKm['v1'] += distance;
-                }
-                if (Math.random() > 0.5) {
-                    const distance = Math.floor(Math.random() * 300) + 100;
-                    const dateStr = `${año}-${String(mes).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-                    logs.push({
-                        id: `mock-v2-${i}`, vehicleId: 'v2', date: dateStr, startKm: currentKm['v2'], endKm: currentKm['v2'] + distance,
-                        totalKm: distance, province: PROVINCIAS[Math.floor(Math.random() * 8)], tripType: 'Visita', notes: 'Visita clientes'
-                    });
-                    currentKm['v2'] += distance;
-                }
-            }
-            return logs;
-        };
-
         const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
-        const getFirstDayOfMonth = (year, month) => {
-            let day = new Date(year, month, 1).getDay();
-            return day === 0 ? 6 : day - 1; 
-        };
+        const getFirstDayOfMonth = (year, month) => { let day = new Date(year, month, 1).getDay(); return day === 0 ? 6 : day - 1; };
         const formatISODate = (date) => date.toISOString().split('T')[0];
 
         // --- COMPONENTE PRINCIPAL ---
         function FleetManagerApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
-            const [vehicles, setVehicles] = useState(() => {
-                const saved = localStorage.getItem('fleet_vehicles');
-                return saved ? JSON.parse(saved) : VEHICULOS_INICIALES;
-            });
-            const [logs, setLogs] = useState(() => {
-                const saved = localStorage.getItem('fleet_logs');
-                return saved ? JSON.parse(saved) : generarDatosPrueba();
-            });
+            const [user, setUser] = useState(null);
+            const [vehicles, setVehicles] = useState([]);
+            const [logs, setLogs] = useState([]);
+            
+            const [loadingAuth, setLoadingAuth] = useState(true);
+            const [loadingData, setLoadingData] = useState(true);
+            const [dbError, setDbError] = useState('');
             
             const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+            const [isResetModalOpen, setIsResetModalOpen] = useState(false);
             const [selectedDate, setSelectedDate] = useState(formatISODate(new Date()));
-            const [selectedVehicleId, setSelectedVehicleId] = useState(vehicles[0]?.id || '');
+            const [selectedVehicleId, setSelectedVehicleId] = useState('');
 
+            // 1. Inicialización de Autenticación (Obligatorio para Firebase Firestore)
             useEffect(() => {
-                localStorage.setItem('fleet_vehicles', JSON.stringify(vehicles));
-                localStorage.setItem('fleet_logs', JSON.stringify(logs));
-            }, [vehicles, logs]);
-
-            const saveLog = (logData) => {
-                setLogs(prevLogs => {
-                    const existingIndex = prevLogs.findIndex(l => l.vehicleId === logData.vehicleId && l.date === logData.date);
-                    if (existingIndex >= 0) {
-                        const newLogs = [...prevLogs];
-                        newLogs[existingIndex] = { ...logData, id: prevLogs[existingIndex].id, totalKm: logData.endKm - logData.startKm };
-                        return newLogs;
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (err) {
+                        console.error("Error Auth:", err);
+                        setDbError("Error de conexión. Revisa tus credenciales de Firebase en el código.");
+                        setLoadingAuth(false);
                     }
-                    return [...prevLogs, { ...logData, id: Date.now().toString(), totalKm: logData.endKm - logData.startKm }];
+                };
+                initAuth();
+
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    setLoadingAuth(false);
                 });
-                setIsLogModalOpen(false);
+                return () => unsubscribe();
+            }, []);
+
+            // 2. Carga y Sincronización de Datos desde Firestore
+            useEffect(() => {
+                if (!user) return;
+
+                setLoadingData(true);
+                const vehiclesRef = getCollectionRef(user, 'vehicles');
+                const logsRef = getCollectionRef(user, 'logs');
+
+                // Listener de Vehículos
+                const unsubVehicles = onSnapshot(vehiclesRef, (snapshot) => {
+                    const vData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    
+                    // Si no hay vehículos, creamos los iniciales (Seeding)
+                    if (vData.length === 0) {
+                        const batch = writeBatch(db);
+                        VEHICULOS_INICIALES.forEach(v => {
+                            const newVRef = doc(vehiclesRef, v.id);
+                            batch.set(newVRef, v);
+                        });
+                        batch.commit();
+                    } else {
+                        setVehicles(vData);
+                        if (!selectedVehicleId && vData.length > 0) setSelectedVehicleId(vData[0].id);
+                    }
+                }, (error) => {
+                    console.error(error);
+                    setDbError("No se pudieron cargar los vehículos. Permisos denegados o base de datos no configurada.");
+                });
+
+                // Listener de Logs
+                const unsubLogs = onSnapshot(logsRef, (snapshot) => {
+                    const lData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+                    setLogs(lData);
+                    setLoadingData(false);
+                }, (error) => {
+                    console.error(error);
+                });
+
+                return () => { unsubVehicles(); unsubLogs(); };
+            }, [user]);
+
+            // --- OPERACIONES CRUD (Persistencia Real) ---
+            
+            const saveLog = async (logData) => {
+                if (!user) return;
+                try {
+                    const logId = logData.id || `log_${Date.now()}`;
+                    const docRef = doc(getCollectionRef(user, 'logs'), logId);
+                    await setDoc(docRef, { 
+                        ...logData, 
+                        id: logId, 
+                        totalKm: Number(logData.endKm) - Number(logData.startKm),
+                        updatedAt: new Date().toISOString()
+                    });
+                    setIsLogModalOpen(false);
+                } catch (err) {
+                    console.error("Error al guardar log:", err);
+                }
             };
 
-            const deleteLog = (logId) => {
-                setLogs(prevLogs => prevLogs.filter(l => l.id !== logId));
-                setIsLogModalOpen(false);
+            const deleteLog = async (logId) => {
+                if (!user) return;
+                try {
+                    await deleteDoc(doc(getCollectionRef(user, 'logs'), logId));
+                    setIsLogModalOpen(false);
+                } catch (err) {
+                    console.error("Error al borrar log:", err);
+                }
+            };
+
+            const resetDatabase = async () => {
+                if (!user) return;
+                setLoadingData(true);
+                setIsResetModalOpen(false);
+                
+                try {
+                    const batch = writeBatch(db);
+                    // Borrar todos los logs
+                    logs.forEach(l => {
+                        batch.delete(doc(getCollectionRef(user, 'logs'), l.id));
+                    });
+                    // Borrar todos los vehículos actuales
+                    vehicles.forEach(v => {
+                        batch.delete(doc(getCollectionRef(user, 'vehicles'), v.id));
+                    });
+                    // Insertar vehículos iniciales (a cero)
+                    VEHICULOS_INICIALES.forEach(v => {
+                        batch.set(doc(getCollectionRef(user, 'vehicles'), v.id), v);
+                    });
+                    
+                    await batch.commit();
+                    setActiveTab('dashboard');
+                } catch (err) {
+                    console.error("Error reiniciando DB:", err);
+                    setDbError("Hubo un error al reiniciar la base de datos.");
+                }
             };
 
             const exportToCSV = () => {
@@ -159,21 +246,34 @@
                 const link = document.createElement("a");
                 link.setAttribute("href", encodedUri);
                 link.setAttribute("download", `informe_flota_${formatISODate(new Date())}.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
             };
+
+            // PANTALLAS DE CARGA Y ERROR
+            if (loadingAuth || (user && loadingData && vehicles.length === 0)) {
+                return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-blue-600"><div className="loader mb-4"></div><p className="font-medium text-slate-500 text-sm">Conectando a base de datos...</p></div>;
+            }
+
+            if (dbError) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+                        <div className="bg-white p-8 rounded-2xl shadow-lg max-w-md text-center border-t-4 border-red-500">
+                            <AlertTriangle size={48} className="mx-auto text-red-500 mb-4"/>
+                            <h2 className="text-xl font-bold text-slate-800 mb-2">Error de Base de Datos</h2>
+                            <p className="text-slate-600 text-sm mb-6">{dbError}</p>
+                            <p className="text-xs text-slate-400">Si estás en GitHub Pages, asegúrate de haber insertado tu configuración de Firebase en el código HTML.</p>
+                        </div>
+                    </div>
+                );
+            }
 
             return (
                 <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans text-gray-800">
                     {/* SIDEBAR */}
                     <nav className="bg-slate-900 text-white w-full md:w-64 flex-shrink-0 md:min-h-screen z-10 sticky top-0 md:fixed flex flex-col shadow-xl">
-                        <div className="p-4 flex items-center gap-3 border-b border-slate-700">
-                            <div className="bg-blue-600 p-2 rounded-lg"><Car size={24} className="text-white"/></div>
-                            <div>
-                                <h1 className="font-bold text-lg leading-tight">FleetManager</h1>
-                                <p className="text-xs text-slate-400">Control de Kilometraje</p>
-                            </div>
+                        <div className="p-4 flex flex-col items-center justify-center gap-2 border-b border-slate-700">
+                            <img src="LOGO SERVIPRINTER METAL.jpg" alt="Serviprinter" className="w-full max-w-[200px] h-auto object-contain mix-blend-screen" />
+                            <p className="text-xs text-slate-400">Control de Flota Cloud</p>
                         </div>
                         
                         <div className="flex-1 flex md:flex-col overflow-x-auto md:overflow-y-auto py-2 md:py-4 px-2 gap-1 no-scrollbar">
@@ -182,29 +282,42 @@
                             <NavItem icon={<FileText size={20}/>} label="Registros" active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} />
                             <NavItem icon={<Car size={20}/>} label="Vehículos" active={activeTab === 'vehicles'} onClick={() => setActiveTab('vehicles')} />
                             
-                            <div className="md:mt-auto hidden md:block px-3 py-4">
+                            <div className="md:mt-auto hidden md:block px-3 py-4 space-y-2">
                                 <button onClick={exportToCSV} className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-sm py-2 rounded-lg transition-colors border border-slate-600">
                                     <Download size={16} /> Exportar Excel
+                                </button>
+                                <button onClick={() => setIsResetModalOpen(true)} className="w-full flex items-center justify-center gap-2 text-red-400 hover:bg-red-900/30 text-sm py-2 rounded-lg transition-colors">
+                                    <RefreshCw size={14} /> Reiniciar Base de Datos
                                 </button>
                             </div>
                         </div>
                     </nav>
 
                     {/* MAIN CONTENT */}
-                    <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto w-full max-w-7xl mx-auto pb-24 md:pb-8">
+                    <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto w-full max-w-7xl mx-auto pb-24 md:pb-8 relative">
                         <div className="flex justify-between items-center mb-6 md:hidden">
                             <h2 className="text-xl font-bold text-slate-800 capitalize">{activeTab}</h2>
-                            <button onClick={exportToCSV} className="p-2 bg-slate-200 rounded-full text-slate-700"><Download size={18} /></button>
+                            <div className="flex gap-2">
+                                <button onClick={() => setIsResetModalOpen(true)} className="p-2 bg-red-100 rounded-full text-red-600"><RefreshCw size={18} /></button>
+                                <button onClick={exportToCSV} className="p-2 bg-slate-200 rounded-full text-slate-700"><Download size={18} /></button>
+                            </div>
                         </div>
 
+                        {/* Indicador de carga de operaciones en segundo plano */}
+                        {loadingData && vehicles.length > 0 && (
+                            <div className="absolute top-4 right-4 bg-white px-3 py-1 rounded-full shadow border border-slate-100 flex items-center gap-2 text-xs font-medium text-slate-500 animate-pulse z-50">
+                                <Loader2 size={12} className="animate-spin"/> Sincronizando...
+                            </div>
+                        )}
+
                         {activeTab === 'dashboard' && <DashboardView logs={logs} vehicles={vehicles} />}
-                        {activeTab === 'calendar' && <CalendarView logs={logs} vehicles={vehicles} onDayClick={(date, vId) => { setSelectedDate(date); setSelectedVehicleId(vId); setIsLogModalOpen(true); }} />}
+                        {activeTab === 'calendar' && <CalendarView logs={logs} vehicles={vehicles} selectedVehicleId={selectedVehicleId} setSelectedVehicleId={setSelectedVehicleId} onDayClick={(date, vId) => { setSelectedDate(date); setSelectedVehicleId(vId); setIsLogModalOpen(true); }} />}
                         {activeTab === 'logs' && <LogsView logs={logs} vehicles={vehicles} onEdit={(log) => { setSelectedDate(log.date); setSelectedVehicleId(log.vehicleId); setIsLogModalOpen(true); }}/>}
-                        {activeTab === 'vehicles' && <VehiclesView vehicles={vehicles} setVehicles={setVehicles} logs={logs} />}
+                        {activeTab === 'vehicles' && <VehiclesView vehicles={vehicles} logs={logs} />}
                     </main>
 
                     {/* FAB MOBILE */}
-                    <button onClick={() => { setSelectedDate(formatISODate(new Date())); setIsLogModalOpen(true); }} className="md:hidden fixed bottom-20 right-4 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 z-20 flex items-center justify-center">
+                    <button onClick={() => { setSelectedDate(formatISODate(new Date())); setIsLogModalOpen(true); }} className="md:hidden fixed bottom-6 right-4 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 z-20 flex items-center justify-center">
                         <Plus size={24} />
                     </button>
 
@@ -213,7 +326,9 @@
                         <Plus size={20} /> Nuevo Registro
                     </button>
 
+                    {/* MODALES */}
                     {isLogModalOpen && <LogModal isOpen={isLogModalOpen} onClose={() => setIsLogModalOpen(false)} date={selectedDate} vehicleId={selectedVehicleId} logs={logs} vehicles={vehicles} onSave={saveLog} onDelete={deleteLog} />}
+                    {isResetModalOpen && <ConfirmResetModal onCancel={() => setIsResetModalOpen(false)} onConfirm={resetDatabase} />}
                 </div>
             );
         }
@@ -267,7 +382,7 @@
 
             return (
                 <div className="space-y-6 animate-in fade-in duration-300">
-                    <div><h2 className="text-2xl font-bold text-slate-800">Resumen General</h2><p className="text-slate-500 text-sm">Estadísticas clave de la flota de vehículos</p></div>
+                    <div><h2 className="text-2xl font-bold text-slate-800">Resumen General</h2><p className="text-slate-500 text-sm">Estadísticas clave guardadas en la nube</p></div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-none">
                             <div className="flex justify-between items-start">
@@ -280,14 +395,14 @@
                                 <div><p className="text-slate-500 text-sm font-medium">Este Mes ({MESES[currentMonth]})</p><h3 className="text-3xl font-bold text-slate-800 mt-1">{stats.monthKm.toLocaleString()} <span className="text-lg font-normal text-slate-500">km</span></h3></div>
                                 <div className="bg-emerald-100 text-emerald-600 p-2 rounded-lg"><Calendar size={24} /></div>
                             </div>
-                            <div className="mt-4 text-xs font-medium text-emerald-600 flex items-center gap-1"><CheckCircle2 size={14}/> Datos al día</div>
+                            <div className="mt-4 text-xs font-medium text-emerald-600 flex items-center gap-1"><CheckCircle2 size={14}/> Sincronizado</div>
                         </Card>
                         <Card>
                             <div className="flex justify-between items-start">
                                 <div><p className="text-slate-500 text-sm font-medium">Acumulado Anual ({currentYear})</p><h3 className="text-3xl font-bold text-slate-800 mt-1">{stats.yearKm.toLocaleString()} <span className="text-lg font-normal text-slate-500">km</span></h3></div>
                                 <div className="bg-amber-100 text-amber-600 p-2 rounded-lg"><AlertTriangle size={24} /></div>
                             </div>
-                            <div className="mt-4 text-xs font-medium text-slate-500">El vehículo más usado es {kmByVehicle[0]?.name || 'N/A'}</div>
+                            <div className="mt-4 text-xs font-medium text-slate-500">Más usado: {kmByVehicle[0]?.name || 'N/A'}</div>
                         </Card>
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -306,7 +421,7 @@
                             </div>
                         </Card>
                         <Card>
-                            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-6">Top 5 Provincias Visitadas</h3>
+                            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-6">Top Provincias</h3>
                             <div className="h-72 flex items-center justify-center">
                                 {kmByProvince.length > 0 ? (
                                 <ResponsiveContainer width="100%" height="100%">
@@ -325,9 +440,8 @@
             );
         }
 
-        function CalendarView({ logs, vehicles, onDayClick }) {
+        function CalendarView({ logs, vehicles, selectedVehicleId, setSelectedVehicleId, onDayClick }) {
             const [currentDate, setCurrentDate] = useState(new Date());
-            const [selectedVehicleId, setSelectedVehicleId] = useState(vehicles[0]?.id || '');
 
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth();
@@ -338,20 +452,21 @@
             const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
 
             const cells = [];
-            for (let i = 0; i < firstDay; i++) cells.push(<div key={`empty-${i}`} className="bg-gray-50/50 border border-slate-100 p-2 min-h-[100px]"></div>);
+            for (let i = 0; i < firstDay; i++) cells.push(<div key={`empty-${i}`} className="bg-gray-50/50 border border-slate-100 p-2 min-h-[100px] hidden md:block"></div>);
 
-            const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId);
+            const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId) || vehicles[0];
+            const currentVId = selectedVehicle?.id || '';
             let mesTotalKm = 0;
 
             for (let day = 1; day <= daysInMonth; day++) {
                 const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const dayLog = logs.find(l => l.vehicleId === selectedVehicleId && l.date === dateStr);
+                const dayLog = logs.find(l => l.vehicleId === currentVId && l.date === dateStr);
                 
                 if (dayLog) mesTotalKm += dayLog.totalKm;
                 const isToday = formatISODate(new Date()) === dateStr;
 
                 cells.push(
-                    <div key={dateStr} onClick={() => onDayClick(dateStr, selectedVehicleId)} className={`bg-white border border-slate-100 p-2 min-h-[100px] hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group flex flex-col ${isToday ? 'ring-2 ring-blue-500 ring-inset bg-blue-50/30' : ''}`}>
+                    <div key={dateStr} onClick={() => onDayClick(dateStr, currentVId)} className={`bg-white border border-slate-100 p-2 min-h-[80px] md:min-h-[100px] hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group flex flex-col ${isToday ? 'ring-2 ring-blue-500 ring-inset bg-blue-50/30' : ''}`}>
                         <div className="flex justify-between items-start mb-2">
                             <span className={`text-sm font-semibold w-6 h-6 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>{day}</span>
                             {dayLog && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">{dayLog.totalKm} km</span>}
@@ -360,7 +475,6 @@
                             <div className="mt-auto space-y-1">
                                 <div className="flex justify-between text-[11px] text-slate-500"><span>Inicio:</span> <span className="font-mono text-slate-700">{dayLog.startKm.toLocaleString()}</span></div>
                                 <div className="flex justify-between text-[11px] text-slate-500"><span>Fin:</span> <span className="font-mono text-slate-700">{dayLog.endKm.toLocaleString()}</span></div>
-                                {(dayLog.province || dayLog.tripType) && <div className="pt-1 mt-1 border-t border-slate-100 flex gap-1 truncate text-[10px] text-slate-400"><MapPin size={10}/> {dayLog.province}</div>}
                             </div>
                         ) : <div className="mt-auto flex justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Plus size={16} className="text-blue-400"/></div>}
                     </div>
@@ -370,24 +484,24 @@
             return (
                 <div className="space-y-4 animate-in fade-in duration-300">
                     <Card className="flex flex-col md:flex-row justify-between items-center gap-4">
-                        <div className="flex items-center gap-4 bg-slate-100 p-1 rounded-lg">
+                        <div className="flex items-center gap-4 bg-slate-100 p-1 rounded-lg w-full md:w-auto justify-between">
                             <button onClick={prevMonth} className="p-2 hover:bg-white rounded-md transition-colors"><ChevronLeft size={20}/></button>
-                            <h2 className="text-lg font-bold w-40 text-center text-slate-800 capitalize">{MESES[month]} {year}</h2>
+                            <h2 className="text-lg font-bold w-32 md:w-40 text-center text-slate-800 capitalize">{MESES[month]} {year}</h2>
                             <button onClick={nextMonth} className="p-2 hover:bg-white rounded-md transition-colors"><ChevronRight size={20}/></button>
                         </div>
                         <div className="flex items-center gap-4 w-full md:w-auto">
-                            <select className="w-full md:w-64 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)}>
+                            <select className="w-full md:w-64 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none" value={currentVId} onChange={(e) => setSelectedVehicleId(e.target.value)}>
                                 {vehicles.map(v => <option key={v.id} value={v.id}>{v.name} ({v.plate})</option>)}
                             </select>
                         </div>
                     </Card>
                     <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex justify-between items-center">
-                        <div><p className="text-blue-800 font-medium text-sm">Resumen mensual para {selectedVehicle?.name}</p></div>
-                        <div className="text-right"><p className="text-2xl font-bold text-blue-700">{mesTotalKm.toLocaleString()} <span className="text-sm font-normal">km recorridos</span></p></div>
+                        <div><p className="text-blue-800 font-medium text-sm">Resumen de {selectedVehicle?.name}</p></div>
+                        <div className="text-right"><p className="text-2xl font-bold text-blue-700">{mesTotalKm.toLocaleString()} <span className="text-sm font-normal">km</span></p></div>
                     </div>
                     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                         <div className="grid grid-cols-7 bg-slate-50 border-b border-slate-200">
-                            {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => <div key={d} className="p-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">{d}</div>)}
+                            {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d, i) => <div key={i} className="p-2 md:p-3 text-center text-xs font-bold text-slate-500 uppercase">{d}</div>)}
                         </div>
                         <div className="grid grid-cols-7 bg-slate-100 gap-[1px]">{cells}</div>
                     </div>
@@ -396,32 +510,34 @@
         }
 
         function LogsView({ logs, vehicles, onEdit }) {
+            // Ordenar por fecha descendente
             const sortedLogs = [...logs].sort((a, b) => new Date(b.date) - new Date(a.date));
             return (
                 <div className="space-y-4 animate-in fade-in duration-300">
-                    <h2 className="text-2xl font-bold text-slate-800 mb-6">Últimos Registros</h2>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-6">Histórico Global</h2>
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
+                            <table className="w-full text-left border-collapse min-w-[600px]">
                                 <thead>
                                     <tr className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
                                         <th className="p-4 font-medium">Fecha</th><th className="p-4 font-medium">Vehículo</th>
                                         <th className="p-4 font-medium text-right">Km Inicio</th><th className="p-4 font-medium text-right">Km Fin</th>
                                         <th className="p-4 font-medium text-right text-blue-600">Total</th>
-                                        <th className="p-4 font-medium hidden md:table-cell">Motivo/Provincia</th><th className="p-4 font-medium"></th>
+                                        <th className="p-4 font-medium">Motivo/Lugar</th><th className="p-4 font-medium"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="text-sm divide-y divide-slate-100">
-                                    {sortedLogs.slice(0, 50).map(log => {
+                                    {sortedLogs.length === 0 ? <tr><td colSpan="7" className="p-8 text-center text-slate-400">No hay registros guardados.</td></tr> : null}
+                                    {sortedLogs.slice(0, 100).map(log => {
                                         const vehicle = vehicles.find(v => v.id === log.vehicleId);
                                         return (
                                             <tr key={log.id} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => onEdit(log)}>
                                                 <td className="p-4 font-medium text-slate-700 whitespace-nowrap">{log.date}</td>
                                                 <td className="p-4"><div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{backgroundColor: vehicle?.color || '#ccc'}}></div>{vehicle?.name || 'Borrado'}</div></td>
-                                                <td className="p-4 text-right font-mono text-slate-500">{log.startKm.toLocaleString()}</td>
-                                                <td className="p-4 text-right font-mono text-slate-500">{log.endKm.toLocaleString()}</td>
-                                                <td className="p-4 text-right font-bold text-blue-600 bg-blue-50/50">{log.totalKm.toLocaleString()}</td>
-                                                <td className="p-4 hidden md:table-cell"><div className="flex flex-col"><span className="text-slate-800">{log.tripType}</span><span className="text-xs text-slate-400 flex items-center gap-1"><MapPin size={10}/>{log.province}</span></div></td>
+                                                <td className="p-4 text-right font-mono text-slate-500">{Number(log.startKm).toLocaleString()}</td>
+                                                <td className="p-4 text-right font-mono text-slate-500">{Number(log.endKm).toLocaleString()}</td>
+                                                <td className="p-4 text-right font-bold text-blue-600 bg-blue-50/50">{Number(log.totalKm).toLocaleString()}</td>
+                                                <td className="p-4"><div className="flex flex-col"><span className="text-slate-800 truncate max-w-[150px]">{log.tripType || '-'}</span><span className="text-xs text-slate-400 truncate max-w-[150px]">{log.province || '-'}</span></div></td>
                                                 <td className="p-4 text-right text-blue-500 hover:text-blue-700 font-medium text-xs">Editar</td>
                                             </tr>
                                         )
@@ -434,11 +550,11 @@
             );
         }
 
-        function VehiclesView({ vehicles, setVehicles, logs }) {
+        function VehiclesView({ vehicles, logs }) {
             const getVehiculosData = () => vehicles.map(v => {
                 const vLogs = logs.filter(l => l.vehicleId === v.id);
                 let currentKm = v.initialKm;
-                if (vLogs.length > 0) currentKm = Math.max(...vLogs.map(l => l.endKm));
+                if (vLogs.length > 0) currentKm = Math.max(...vLogs.map(l => Number(l.endKm)));
                 return { ...v, currentKm };
             });
             const data = getVehiculosData();
@@ -447,7 +563,7 @@
                 <div className="space-y-6 animate-in fade-in duration-300">
                     <div className="flex justify-between items-center">
                         <h2 className="text-2xl font-bold text-slate-800">Flota de Vehículos</h2>
-                        <span className="bg-blue-100 text-blue-700 py-1 px-3 rounded-full text-sm font-bold">{vehicles.length} / 5</span>
+                        <span className="bg-blue-100 text-blue-700 py-1 px-3 rounded-full text-sm font-bold">{vehicles.length} Activos</span>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {data.map(v => (
@@ -458,7 +574,6 @@
                                     <div className={`p-2 rounded-lg ${v.status === 'activo' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}><Car size={20} /></div>
                                 </div>
                                 <div className="space-y-3 mt-6 border-t border-slate-100 pt-4">
-                                    <div className="flex justify-between items-center"><span className="text-sm text-slate-500">Km Iniciales</span><span className="font-mono text-sm text-slate-700">{v.initialKm.toLocaleString()}</span></div>
                                     <div className="flex justify-between items-center bg-slate-50 p-2 rounded"><span className="text-sm font-bold text-slate-700">Km Actuales</span><span className="font-mono font-bold text-blue-600">{v.currentKm.toLocaleString()}</span></div>
                                 </div>
                             </Card>
@@ -468,40 +583,43 @@
             );
         }
 
+        // --- COMPONENTE: MODAL DE FORMULARIO DE REGISTRO ---
         function LogModal({ isOpen, onClose, date, vehicleId, logs, vehicles, onSave, onDelete }) {
             const vehicle = vehicles.find(v => v.id === vehicleId) || vehicles[0];
-            const existingLog = logs.find(l => l.vehicleId === vehicle.id && l.date === date);
+            const existingLog = logs.find(l => l.vehicleId === vehicle?.id && l.date === date);
             
             const getSuggestedStartKm = () => {
                 if (existingLog) return existingLog.startKm;
-                const previousLogs = logs.filter(l => l.vehicleId === vehicle.id && l.date < date).sort((a, b) => new Date(b.date) - new Date(a.date));
+                const previousLogs = logs.filter(l => l.vehicleId === vehicle?.id && l.date < date).sort((a, b) => new Date(b.date) - new Date(a.date));
                 if (previousLogs.length > 0) return previousLogs[0].endKm; 
-                return vehicle.initialKm; 
+                return vehicle?.initialKm || 0; 
             };
 
             const [formData, setFormData] = useState({
-                vehicleId: vehicle.id, date: date, startKm: getSuggestedStartKm(), endKm: existingLog ? existingLog.endKm : '',
+                id: existingLog?.id || null, vehicleId: vehicle?.id || '', date: date, startKm: getSuggestedStartKm(), endKm: existingLog ? existingLog.endKm : '',
                 province: existingLog?.province || '', tripType: existingLog?.tripType || '', notes: existingLog?.notes || ''
             });
-
             const [error, setError] = useState('');
+            const [isSaving, setIsSaving] = useState(false);
 
             useEffect(() => {
+                if(existingLog) return;
                 const prevLogs = logs.filter(l => l.vehicleId === formData.vehicleId && l.date < formData.date).sort((a,b) => new Date(b.date) - new Date(a.date));
                 const suggestedStart = prevLogs.length > 0 ? prevLogs[0].endKm : (vehicles.find(v=>v.id===formData.vehicleId)?.initialKm || 0);
-                const currentExistingLog = logs.find(l => l.vehicleId === formData.vehicleId && l.date === formData.date);
-                if (!currentExistingLog && !existingLog) setFormData(prev => ({ ...prev, startKm: suggestedStart }));
+                setFormData(prev => ({ ...prev, startKm: suggestedStart }));
             }, [formData.vehicleId, formData.date]);
 
             const totalCalculado = (Number(formData.endKm) || 0) - Number(formData.startKm);
 
-            const handleSubmit = (e) => {
+            const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!formData.endKm || Number(formData.endKm) <= Number(formData.startKm)) {
                     setError('El Km Final debe ser mayor que el Km de Inicio.'); return;
                 }
                 setError('');
-                onSave({ ...formData, startKm: Number(formData.startKm), endKm: Number(formData.endKm) });
+                setIsSaving(true);
+                await onSave(formData);
+                setIsSaving(false);
             };
 
             return (
@@ -564,9 +682,56 @@
                         <div className="bg-slate-50 p-4 border-t border-slate-200 flex justify-between items-center shrink-0">
                             {existingLog ? <button type="button" onClick={() => onDelete(existingLog.id)} className="text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors">Borrar</button> : <div></div>}
                             <div className="flex gap-2">
-                                <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg text-sm font-medium transition-colors">Cancelar</button>
-                                <button type="submit" form="logForm" className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-md">Guardar Registro</button>
+                                <button type="button" onClick={onClose} disabled={isSaving} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg text-sm font-medium transition-colors">Cancelar</button>
+                                <button type="submit" form="logForm" disabled={isSaving} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-md flex items-center gap-2">
+                                    {isSaving ? <Loader2 size={16} className="animate-spin"/> : null}
+                                    {isSaving ? 'Guardando...' : 'Guardar en BD'}
+                                </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- COMPONENTE: MODAL DE CONFIRMACIÓN DE REINICIO ---
+        function ConfirmResetModal({ onCancel, onConfirm }) {
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleConfirm = () => {
+                if (password === 'SERVIPRI28') {
+                    onConfirm();
+                } else {
+                    setError('Contraseña incorrecta. No se puede borrar el historial.');
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
+                        <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <AlertTriangle size={32} />
+                        </div>
+                        <h3 className="text-xl font-bold text-slate-800 mb-2">Confirmar borrado del historial</h3>
+                        <p className="text-sm text-slate-500 mb-4">Esta acción borrará <strong>TODO</strong> el histórico de kilómetros y pondrá los vehículos a cero de forma permanente en la nube. Esta acción no se puede deshacer.</p>
+                        
+                        <div className="mb-6 text-left">
+                            <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Introduce la contraseña para continuar</label>
+                            <input 
+                                type="password" 
+                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
+                                value={password}
+                                onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                                placeholder="Contraseña..."
+                                autoFocus
+                            />
+                            {error && <p className="text-xs text-red-500 mt-2 font-medium">{error}</p>}
+                        </div>
+
+                        <div className="flex gap-3 justify-center">
+                            <button onClick={onCancel} className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors w-full">Cancelar</button>
+                            <button onClick={handleConfirm} className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg font-medium transition-colors shadow-md w-full">Sí, Borrar Todo</button>
                         </div>
                     </div>
                 </div>
